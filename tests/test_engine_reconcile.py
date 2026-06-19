@@ -135,6 +135,35 @@ def test_conflict_overlapping_writes_markers_and_does_not_push(tmp_path):
     assert not sock.applies, "conflict must not be pushed"
 
 
+def test_push_force_overwrites_remote_conflict_with_local(tmp_path):
+    st = _bootstrap(tmp_path)
+    local = "line1\nLINE2 LOCAL\nline3\n"
+    remote = "line1\nLINE2 REMOTE\nline3\n"
+    (tmp_path / "main.tex").write_text(local)
+    rest = FakeREST(zip_main=remote)
+    sock = FakeSock(doc_content=remote, doc_version=7)
+
+    r = _engine(tmp_path, st, rest, sock).reconcile(direction="push", force=True)
+
+    assert "main.tex" in r["pushed"]
+    assert sock.doc["d1"]["content"] == local
+    assert "main.tex" not in r["conflicts"]
+
+
+def test_pull_force_overwrites_local_conflict_with_remote(tmp_path):
+    st = _bootstrap(tmp_path)
+    remote = "line1\nLINE2 REMOTE\nline3\n"
+    (tmp_path / "main.tex").write_text("line1\nLINE2 LOCAL\nline3\n")
+    rest = FakeREST(zip_main=remote)
+    sock = FakeSock(doc_content=remote, doc_version=7)
+
+    r = _engine(tmp_path, st, rest, sock).reconcile(direction="pull", force=True)
+
+    assert "main.tex" in r["pulled"]
+    assert (tmp_path / "main.tex").read_text() == remote
+    assert "main.tex" not in r["conflicts"]
+
+
 def test_c1_clean_auto_merge_is_pushed_no_data_loss_two_passes(tmp_path):
     # non-overlapping changes: local edits line2, remote edits line4 -> clean 3-way merge.
     # C1 fix: the merged result MUST be pushed, so a second pass converges (SKIP) and the
@@ -206,3 +235,14 @@ def test_apply_doc_update_empty_ops_is_success_not_conflict(tmp_path):
     # force a PUSH-classified path whose target already equals remote -> empty ops -> success
     eng._apply_doc_update("main.tex", "d1", st.data["base"], base, results := {"pulled": [], "pushed": [], "conflicts": [], "deleted": []})
     assert "main.tex" in results["pushed"] and "main.tex" not in results["conflicts"]
+
+
+def test_remote_doc_text_reconstructs_overleaf_line_array(tmp_path):
+    class Sock:
+        def join_doc(self, doc_id):
+            return {"docLines": ["line1", "line2", ""], "version": 3}
+
+    eng = Engine(state=None, rest=None, sock=Sock(), project_id="p1",
+                 working_root=tmp_path, ignore=lambda p: False, on_event=lambda *a: None)
+
+    assert eng._remote_doc_text("d1") == ("line1\nline2\n", 3)

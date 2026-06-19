@@ -9,16 +9,16 @@ from olmount.sync.engine import Engine
 
 def build_engine(server=None):
     cfg = Config.load()
-    name = server or cfg.default_server()
-    prof = cfg.server(name)
     work = pathlib.Path.cwd()
     st = ProjectState(work)
     if not st.exists():
         raise SystemExit("not an olmount project (no .olsync/ here)")
     st.load()
+    name = server or st.data.get("server") or cfg.default_server()
+    prof = cfg.server(name)
     rest = OverleafREST(HttpClient(prof.url, prof.cookie, prof.csrf))
     sock = EphemeralOLClient(prof.url, prof.cookie)
-    sock.connect()
+    sock.connect(project_id=st.data["projectId"])
     ig = IgnoreFilter.from_file(work / ".olignore")
     eng = Engine(state=st, rest=rest, sock=sock, project_id=st.data["projectId"],
                  working_root=work,

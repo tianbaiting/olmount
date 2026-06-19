@@ -6,7 +6,7 @@ from olmount.commands._run import build_engine
 def pull_cmd(force):
     eng, sock = build_engine()
     try:
-        r = eng.reconcile(direction="pull")
+        r = eng.reconcile(direction="pull", force=force)
         _report(r)
     finally:
         sock.disconnect()

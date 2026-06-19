@@ -123,9 +123,14 @@ class Engine:
 
     def _remote_doc_text(self, doc_id):
         res = self.sock.join_doc(doc_id)
-        return "".join(res["docLines"]), res["version"]
+        lines = res["docLines"]
+        if any(line.endswith(("\n", "\r")) for line in lines):
+            text = "".join(lines)
+        else:
+            text = "\n".join(lines)
+        return text, res["version"]
 
-    def reconcile(self, direction="both"):
+    def reconcile(self, direction="both", force=False):
         st = self.state
         tree = RemoteTree(self.sock.join_project(self.project_id))
         zf = self.rest.download_zip(self.project_id)
@@ -143,9 +148,10 @@ class Engine:
         ok = True
         try:
             if direction in ("both", "pull"):
-                self._do_pulls(actions, zf, results)
+                self._do_pulls(actions, zf, results, force=force and direction == "pull")
             if direction in ("both", "push"):
-                self._do_pushes(actions, base_meta, local_snap, remote_snap, tree, zf, results)
+                self._do_pushes(actions, base_meta, local_snap, remote_snap, tree, zf, results,
+                                force=force and direction == "push")
         except Exception as e:
             ok = False
             self.on_event(f"sync error: {e}")
@@ -157,7 +163,8 @@ class Engine:
                 self._advance()
         return results
 
-    def _do_pulls(self, actions, zf, results):
+    def _do_pulls(self, actions, zf, results, force=False):
+        remote_names = {n for n in zf.namelist() if not n.endswith("/")}
         for p, act in actions.items():
             if act == Action.PULL:
                 atomic_write_bytes(self.working_root / p, zf.read(p))
@@ -167,8 +174,17 @@ class Engine:
                 if fp.is_file():
                     fp.unlink()
                 results["deleted"].append(p)
+            elif force and act == Action.CONFLICT:
+                if p in remote_names:
+                    atomic_write_bytes(self.working_root / p, zf.read(p))
+                    results["pulled"].append(p)
+                else:
+                    fp = self.working_root / p
+                    if fp.is_file():
+                        fp.unlink()
+                    results["deleted"].append(p)
 
-    def _do_pushes(self, actions, base_meta, local_snap, remote_snap, tree, zf, results):
+    def _do_pushes(self, actions, base_meta, local_snap, remote_snap, tree, zf, results, force=False):
         for p, act in actions.items():
             if act == Action.PUSH:
                 self._push_path(p, base_meta, local_snap, remote_snap, tree, results)
@@ -179,9 +195,19 @@ class Engine:
                     self.rest.delete_entity(self.project_id, kind, eid)
                 results["deleted"].append(p)
             elif act == Action.CONFLICT:
-                self._resolve_conflict(p, base_meta, local_snap, remote_snap, tree, zf, results)
+                if force:
+                    if p in local_snap:
+                        self._push_path(p, base_meta, local_snap, remote_snap, tree, results, force=True)
+                    else:
+                        found = tree.find_id_by_path(p)
+                        if found:
+                            eid, kind = found
+                            self.rest.delete_entity(self.project_id, kind, eid)
+                        results["deleted"].append(p)
+                else:
+                    self._resolve_conflict(p, base_meta, local_snap, remote_snap, tree, zf, results)
 
-    def _push_path(self, p, base_meta, local_snap, remote_snap, tree, results):
+    def _push_path(self, p, base_meta, local_snap, remote_snap, tree, results, force=False):
         kind = local_snap[p]["kind"]
         parent = self._ensure_parent(p, tree)
         data = self._local_content(p)
@@ -200,20 +226,20 @@ class Engine:
                 return
             eid, _rkind = found
             if kind == "doc":
-                self._apply_doc_update(p, eid, base_meta, data.decode("utf-8"), results)
+                self._apply_doc_update(p, eid, base_meta, data.decode("utf-8"), results, force=force)
             else:
                 self.rest.upload_file(self.project_id, parent, pathlib.Path(p).name, data)
                 self.rest.delete_entity(self.project_id, "file", eid)
                 results["pushed"].append(p)
 
-    def _apply_doc_update(self, p, doc_id, base_meta, local_text, results):
+    def _apply_doc_update(self, p, doc_id, base_meta, local_text, results, force=False):
         """R3: push `local_text` (the desired final content) via OT, generating ops from
         CURRENT remote. On rejection re-fetch + full re-merge + regenerate; never resend
         stale ops. If remote already equals target (converged), that's a no-op success."""
         base_text = self._base_content(p).decode("utf-8") if p in base_meta else local_text
         remote_now, remote_version = self._remote_doc_text(doc_id)
         target = local_text
-        if remote_now != base_text:
+        if remote_now != base_text and not force:
             target, _conf = three_way_merge(base_text, local_text, remote_now)
         for _ in range(MAX_OT_RETRIES):
             ops = diff_ops(remote_now, target)  # from CURRENT remote -> target
@@ -230,7 +256,7 @@ class Engine:
                 return
             # rejected: re-fetch remote, full re-merge, regenerate (R3 — never resend stale ops)
             remote_now, remote_version = self._remote_doc_text(doc_id)
-            target, _ = three_way_merge(base_text, local_text, remote_now)
+            target = local_text if force else three_way_merge(base_text, local_text, remote_now)[0]
         results["conflicts"].append(p)
         self.on_event(f"OT conflict (could not converge): {p}")
 

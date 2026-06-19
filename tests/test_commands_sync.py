@@ -2,6 +2,7 @@ import responses, io, zipfile, pathlib, json
 from click.testing import CliRunner
 from olmount.cli import main
 from olmount.config import Config
+from olmount.sync.state import ProjectState
 
 def _bootstrap_cfg(tmp_path, monkeypatch):
     cfg = tmp_path / "c.toml"
@@ -23,7 +24,7 @@ def test_clone_downloads_and_inits_state(tmp_path, monkeypatch):
     joinpay = pathlib.Path("tests/fixtures/joinproject.json").read_text()
     import olmount.api.socketio as sio_mod
     monkeypatch.setattr(sio_mod.EphemeralOLClient, "join_project", lambda self, pid: json.loads(joinpay))
-    monkeypatch.setattr(sio_mod.EphemeralOLClient, "connect", lambda self: None)
+    monkeypatch.setattr(sio_mod.EphemeralOLClient, "connect", lambda self, *a, **k: None)
     monkeypatch.setattr(sio_mod.EphemeralOLClient, "disconnect", lambda self: None)
     work = tmp_path / "work"
     r = CliRunner().invoke(main, ["clone", "p1", "--server", "h", "--into", str(work)])
@@ -45,7 +46,7 @@ def test_status_reports_local_change(tmp_path, monkeypatch):
     joinpay = pathlib.Path("tests/fixtures/joinproject.json").read_text()
     import olmount.api.socketio as sio_mod
     monkeypatch.setattr(sio_mod.EphemeralOLClient, "join_project", lambda self, pid: json.loads(joinpay))
-    monkeypatch.setattr(sio_mod.EphemeralOLClient, "connect", lambda self: None)
+    monkeypatch.setattr(sio_mod.EphemeralOLClient, "connect", lambda self, *a, **k: None)
     monkeypatch.setattr(sio_mod.EphemeralOLClient, "disconnect", lambda self: None)
     work = tmp_path / "work"
     CliRunner().invoke(main, ["clone", "p1", "--server", "h", "--into", str(work)])
@@ -57,3 +58,25 @@ def test_status_reports_local_change(tmp_path, monkeypatch):
     r = CliRunner().invoke(main, ["status"])
     assert r.exit_code == 0, r.output
     assert "main.tex" in r.output
+
+def test_build_engine_uses_project_server_not_config_default(tmp_path, monkeypatch):
+    cfg = tmp_path / "c.toml"
+    monkeypatch.setattr("olmount.config.CONFIG_PATH", cfg)
+    c = Config.load()
+    c.set_server("wrong", url="https://wrong.example", cookie="cw", csrf="x")
+    c.set_server("right", url="https://right.example", cookie="cr", csrf="x")
+    c.set_default("wrong")
+    c.save()
+    ProjectState.init(tmp_path, server="right", projectId="p1", projectName="paper", rootDocId="d1")
+    monkeypatch.chdir(tmp_path)
+
+    import olmount.api.socketio as sio_mod
+    monkeypatch.setattr(sio_mod.EphemeralOLClient, "connect", lambda self, *a, **k: None)
+
+    from olmount.commands._run import build_engine
+    eng, sock = build_engine()
+
+    try:
+        assert eng.rest.http.base_url == "https://right.example/"
+    finally:
+        sock.disconnect()

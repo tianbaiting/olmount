@@ -27,8 +27,12 @@ def clone_cmd(project, server, into):
         out = work / n
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(zf.read(n))
-    with EphemeralOLClient(prof.url, prof.cookie) as sock:
+    sock = EphemeralOLClient(prof.url, prof.cookie)
+    try:
+        sock.connect(project_id=pid)
         tree_payload = sock.join_project(pid)
+    finally:
+        sock.disconnect()
     root_id = tree_payload.get("rootDoc_id", "")
     st = ProjectState.init(work, server=name, projectId=pid, projectName=pname, rootDocId=root_id)
     tree = RemoteTree(tree_payload)
