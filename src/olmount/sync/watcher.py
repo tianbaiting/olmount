@@ -78,13 +78,13 @@ class Watcher:
 
     def run(self):
         self.acquire_lock()
-        handler = FileSystemEventHandler()
-        handler.on_any_event = lambda e: (self._on_local_event() if not self._ignored(e.src_path) else None)
-        obs = Observer()
-        obs.schedule(handler, str(self.working_root), recursive=True)
-        obs.start()
-        last = time.time()
         try:
+            handler = FileSystemEventHandler()
+            handler.on_any_event = lambda e: (self._on_local_event() if not self._ignored(e.src_path) else None)
+            obs = Observer()
+            obs.schedule(handler, str(self.working_root), recursive=True)
+            obs.start()
+            last = time.time()
             while not self._stop.wait(0.2):
                 if time.time() - last >= self.interval:
                     last = time.time()
@@ -94,8 +94,11 @@ class Watcher:
                 if self._timer:
                     self._timer.cancel()
                     self._timer = None
-            obs.stop()
-            obs.join()
+            if "obs" in locals():
+                try:
+                    obs.stop(); obs.join()
+                except Exception:
+                    pass
             self.release_lock()
 
     def stop(self):

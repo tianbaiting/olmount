@@ -64,3 +64,18 @@ def test_stale_lock_reclaimed_if_process_dead(tmp_path):
     w2 = Watcher(tmp_path, interval=10, debounce=0.05, do_reconcile=lambda: None)
     w2.acquire_lock()             # should NOT raise (reclaimed)
     w2.release_lock()
+
+
+def test_run_releases_lock_on_setup_failure(tmp_path, monkeypatch):
+    (tmp_path / ".olsync").mkdir()
+    w = Watcher(tmp_path, interval=10, debounce=0.05, do_reconcile=lambda: None)
+    # make Observer() raise
+    import olmount.sync.watcher as wmod
+    class BoomObserver:
+        def __init__(self): raise RuntimeError("observer init failed")
+    monkeypatch.setattr(wmod, "Observer", BoomObserver)
+    import pytest
+    with pytest.raises(RuntimeError):
+        w.run()
+    # lock must have been released despite the setup failure
+    assert not (tmp_path / ".olsync" / "watch.lock").exists()

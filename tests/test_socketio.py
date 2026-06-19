@@ -39,3 +39,15 @@ def test_apply_ot_update_normalizes_multiarg(monkeypatch):
     out = c.apply_ot_update("d1", {"doc":"d1","v":7,"op":[]})
     assert isinstance(out, dict)
     assert out["accepted"] is False and out["v"] == 9
+
+def test_emit_times_out_if_no_ack(monkeypatch):
+    class NoAckSock:
+        def on(self, ev, cb): pass
+        def emit(self, ev, data, callback=None): pass  # never calls callback
+        def disconnect(self): pass
+        def connect(self): pass
+    monkeypatch.setattr("olmount.api.socketio._new_transport", lambda *a, **k: NoAckSock())
+    monkeypatch.setattr("olmount.api.socketio.EMIT_TIMEOUT", 0.1)
+    c = EphemeralOLClient("https://ol.lab.edu/", "c")
+    with pytest.raises(TimeoutError):
+        c.join_project("p1")  # via _emit

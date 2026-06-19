@@ -1,5 +1,8 @@
 from __future__ import annotations
+import threading
 import socketio  # python-socketio client
+
+EMIT_TIMEOUT = 30.0
 
 def _new_transport(base_url, cookie):
     s = socketio.Client()
@@ -26,21 +29,26 @@ class EphemeralOLClient:
             except Exception: pass
             self._s = None
 
-    def _emit(self, event, data):
+    def _emit(self, event, data, timeout=None):
         if self._s is None:
             self._s = _new_transport(self.base_url, self.cookie)
-        result = {}
+        if timeout is None:
+            timeout = EMIT_TIMEOUT
+        box = {}
+        done = threading.Event()
         def cb(*args):
             if len(args) == 0:
-                result["res"] = None
+                box["res"] = None
             elif len(args) == 1:
-                result["res"] = args[0]
+                box["res"] = args[0]
             else:
                 # Overleaf positional callbacks: (err, payload, ...) -> take payload ([1])
-                result["res"] = args[1]
+                box["res"] = args[1]
+            done.set()
         self._s.emit(event, data, callback=cb)
-        self._s.sleep(0.01)  # let callback fire; engine callers run single-threaded
-        return result.get("res")
+        if not done.wait(timeout):
+            raise TimeoutError(f"socket.io '{event}' ack timed out after {timeout}s")
+        return box.get("res")
 
     def join_project(self, project_id) -> dict:
         return self._emit("joinProject", {"project_id": project_id})
