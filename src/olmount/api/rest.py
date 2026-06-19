@@ -67,3 +67,16 @@ class OverleafREST:
         r = self.http.post_json(f"project/{project_id}/compile?auto_compile=true", body,
                                 {"X-Csrf-Token": self.http.csrf})
         return r.json()
+
+    def download_output(self, project_id, output_file, compile_group,
+                        clsi_server_id=None, pdf_download_domain=None) -> bytes:
+        url = output_file["url"]
+        if pdf_download_domain and clsi_server_id:
+            cdn = (f"{pdf_download_domain.rstrip('/')}/{url.lstrip('/')}"
+                   f"?compileGroup={compile_group}"
+                   f"&clsiserverid={clsi_server_id}"
+                   f"&enable_pdf_caching=true")
+            # CDN is cross-origin: do NOT send web cookies
+            return self.http.http_get_absolute(cdn, include_cookies=False).content
+        # legacy: download via the web frontend (cookies required)
+        return self.http.get(url.lstrip("/")).content

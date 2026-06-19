@@ -39,6 +39,21 @@ class HttpClient:
         return self._retry("GET", self.base_url + route.lstrip("/"),
                            headers=self._headers(extra_headers), stream=stream)
 
+    def http_get_absolute(self, absolute_url, include_cookies=False, stream=False):
+        headers = {"Connection": "keep-alive"}
+        if include_cookies:
+            headers["Cookie"] = self.cookie
+        last = None
+        for attempt in range(self.max_retries + 1):
+            resp = self.session.get(absolute_url, headers=headers, timeout=self.timeout,
+                                    allow_redirects=False, stream=stream)
+            if resp.status_code < 500 and resp.status_code != 429:
+                return resp
+            last = resp
+            time.sleep(0.5 * (2 ** attempt))
+        raise HttpError(f"GET {absolute_url} failed: {last.status_code if last else '?'}",
+                        status_code=(last.status_code if last else None))
+
     def post_json(self, route: str, body: dict | None = None, extra_headers: dict | None = None):
         body = dict(body or {})
         body.setdefault("_csrf", self.csrf)
