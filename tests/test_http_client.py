@@ -1,5 +1,5 @@
 import responses, pytest
-from olmount.api.http_client import HttpClient
+from olmount.api.http_client import HttpClient, HttpError
 
 @responses.activate
 def test_get_sends_cookie_csrf_and_retries_5xx():
@@ -16,5 +16,7 @@ def test_get_sends_cookie_csrf_and_retries_5xx():
 def test_get_raises_on_401_no_retry():
     responses.add(responses.GET, "https://ol.lab.edu/login", status=401)
     c = HttpClient("https://ol.lab.edu/", "c", "csrf")
-    with pytest.raises(Exception): c.get("login")
+    with pytest.raises(HttpError) as exc:
+        c.get("login")
+    assert exc.value.status_code == 401
     assert len(responses.calls) == 1

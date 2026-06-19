@@ -2,7 +2,10 @@ from __future__ import annotations
 import time
 import requests
 
-class HttpError(Exception): ...
+class HttpError(Exception):
+    def __init__(self, message: str = "", status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 class HttpClient:
     def __init__(self, base_url: str, cookie: str, csrf: str = "",
@@ -25,12 +28,12 @@ class HttpClient:
             resp = self.session.request(method, url, timeout=self.timeout,
                                         allow_redirects=False, **kwargs)
             if resp.status_code in (401, 403):
-                raise HttpError(f"{method} {url} auth failed: {resp.status_code}")
+                raise HttpError(f"{method} {url} auth/permission failed: {resp.status_code}", status_code=resp.status_code)
             if resp.status_code < 500 and resp.status_code != 429:
                 return resp
             last = resp
             time.sleep(0.5 * (2 ** attempt))
-        raise HttpError(f"{method} {url} failed after retries: {last.status_code if last else '?'}")
+        raise HttpError(f"{method} {url} failed after retries: {last.status_code if last else '?'}", status_code=(last.status_code if last else None))
 
     def get(self, route: str, extra_headers: dict | None = None, stream: bool = False):
         return self._retry("GET", self.base_url + route.lstrip("/"),
