@@ -35,3 +35,18 @@ def test_property_apply_reconstructs_target(a, b):
 
 def test_empty_ops_when_equal():
     assert diff_ops("same", "same") == []
+
+def test_replacement_uses_evolving_positions():
+    # delete+insert at the same spot: both ops at p=1 (evolving doc), NOT p=1 then p=2
+    assert diff_ops("abc", "axc") == [{"p": 1, "d": "b"}, {"p": 1, "i": "x"}]
+
+def test_astral_replacement_evolving_positions():
+    # 😀😀😀 -> 😀😂😀 : delete 2nd astral at p=2, insert 😂 at p=2 (evolving)
+    assert diff_ops("😀😀😀", "😀😂😀") == [{"p": 2, "d": "😀"}, {"p": 2, "i": "😂"}]
+
+def test_sequential_apply_matches_target_for_replacement():
+    # independent forward-sequential apply (the Overleaf wire model)
+    ops = diff_ops("abc", "axc")
+    assert apply_ops(ops, "abc") == "axc"
+    ops2 = diff_ops("😀😀😀", "😀😂😀")
+    assert apply_ops(ops2, "😀😀😀") == "😀😂😀"
