@@ -46,6 +46,7 @@ from olmount.commands.status import status_cmd; main.add_command(status_cmd)    
 from olmount.commands.pull import pull_cmd; main.add_command(pull_cmd)               # noqa: E402
 from olmount.commands.push import push_cmd; main.add_command(push_cmd)               # noqa: E402
 from olmount.commands.sync import sync_cmd; main.add_command(sync_cmd)               # noqa: E402
+from olmount.commands.watch import watch_cmd; main.add_command(watch_cmd)            # noqa: E402
 
 if __name__ == "__main__":
     main()
