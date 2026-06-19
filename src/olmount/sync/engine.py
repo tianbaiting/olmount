@@ -1,5 +1,9 @@
 from __future__ import annotations
 from enum import Enum
+import posixpath
+import pathlib
+
+from olmount.util import sha1_hex
 
 
 class Action(Enum):
@@ -57,3 +61,38 @@ def classify_path(path: str, base_meta, local_meta, remote_meta) -> Action:
         ("absent",    "changed"):   Action.CONFLICT,   # delete/edit
         ("absent",    "absent"):    Action.NOOP,
     }[(lstate, rstate)]
+
+
+def build_local_snapshot(root, ignore) -> dict[str, dict]:
+    root = pathlib.Path(root)
+    snap = {}
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(root).as_posix()
+        if ignore(rel):
+            continue
+        data = p.read_bytes()
+        snap[rel] = {"kind": _guess_kind(rel), "sha1": sha1_hex(data), "size": len(data)}
+    return snap
+
+
+def build_remote_snapshot(zf, tree: "RemoteTree") -> dict[str, dict]:
+    snap = {}
+    for name in zf.namelist():
+        if name.endswith("/"):
+            continue
+        eid, kind = tree.find_id_by_path(name) or (None, _guess_kind(name))
+        data = zf.read(name)
+        meta = {"kind": kind or _guess_kind(name), "sha1": sha1_hex(data), "size": len(data)}
+        if eid:
+            meta["id"] = eid
+        if kind == "doc" and eid is not None:
+            meta["docVersion"] = tree.doc_version(eid)
+        snap[name] = meta
+    return snap
+
+
+def _guess_kind(path: str) -> str:
+    return "doc" if posixpath.splitext(path)[1].lower() in {
+        ".tex", ".bib", ".cls", ".sty", ".txt", ".md", ".latexmkrc", ".tikz"} else "file"
