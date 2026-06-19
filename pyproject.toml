@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "olmount"
+version = "0.1.0"
+description = "Two-way sync client for Overleaf (incl. self-hosted)"
+requires-python = ">=3.10"
+dependencies = [
+  "requests>=2.31",
+  "python-socketio>=5.10",
+  "diff-match-patch>=1.0",
+  "merge3>=0.0.0",
+  "watchdog>=3.0",
+  "click>=8.1",
+  "rich>=13.0",
+  "pathspec>=0.11",
+  "tomli>=2.0; python_version<'3.11'",
+  "tomli-w>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-mock>=3.12", "responses>=0.24"]
+
+[project.scripts]
+olmount = "olmount.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
