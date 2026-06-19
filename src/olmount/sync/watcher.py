@@ -14,6 +14,7 @@ class Watcher:
         self._timer = None
         self._stop = threading.Event()
         self._mutex = threading.Lock()
+        self._reconcile_lock = threading.Lock()
 
     def acquire_lock(self):
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -22,7 +23,34 @@ class Watcher:
             os.write(fd, str(os.getpid()).encode())
             os.close(fd)
         except FileExistsError:
-            raise RuntimeError("another `watch` already runs in this project")
+            if self._pid_alive(self._read_lock_pid()):
+                raise RuntimeError("another `watch` already runs in this project")
+            # stale lock from a dead process -> reclaim
+            try:
+                self._lock_path.unlink()
+            except FileNotFoundError:
+                pass
+            fd = os.open(self._lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+
+    def _read_lock_pid(self):
+        try:
+            return int(self._lock_path.read_text().strip())
+        except (ValueError, OSError):
+            return None
+
+    @staticmethod
+    def _pid_alive(pid):
+        if pid is None:
+            return True   # unknown -> be safe, treat as alive
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+        except OSError:
+            return False
 
     def release_lock(self):
         try:
@@ -39,7 +67,14 @@ class Watcher:
             self._timer.start()
 
     def _trigger(self):
-        self.do_reconcile()
+        self._safe_reconcile()
+
+    def _safe_reconcile(self):
+        if self._reconcile_lock.acquire(blocking=False):
+            try:
+                self.do_reconcile()
+            finally:
+                self._reconcile_lock.release()
 
     def run(self):
         self.acquire_lock()
@@ -53,14 +88,22 @@ class Watcher:
             while not self._stop.wait(0.2):
                 if time.time() - last >= self.interval:
                     last = time.time()
-                    self.do_reconcile()
+                    self._safe_reconcile()
         finally:
+            with self._mutex:
+                if self._timer:
+                    self._timer.cancel()
+                    self._timer = None
             obs.stop()
             obs.join()
             self.release_lock()
 
     def stop(self):
         self._stop.set()
+        with self._mutex:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
 
     def _ignored(self, path):
         return ".olsync" in Path(path).parts
