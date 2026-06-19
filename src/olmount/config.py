@@ -1,6 +1,6 @@
 # src/olmount/config.py
 from __future__ import annotations
-import os, sys
+import os, sys, tempfile
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -43,8 +43,16 @@ class Config:
         data = {"default_server": self.default,
                 "servers": {n: {k: v for k, v in asdict(s).items() if k != "name"}
                             for n, s in self.servers.items()}}
-        with CONFIG_PATH.open("wb") as f:
-            tomli_w.dump(data, f)
+        fd, tmp = tempfile.mkstemp(dir=str(CONFIG_PATH.parent), prefix="config.", suffix=".tmp")
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                tomli_w.dump(data, f)
+            os.replace(tmp, CONFIG_PATH)
+        except BaseException:
+            try: os.unlink(tmp)
+            except OSError: pass
+            raise
 
     def set_server(self, name, **fields) -> None:
         if name in self.servers:

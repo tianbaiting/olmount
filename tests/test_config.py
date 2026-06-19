@@ -1,6 +1,5 @@
 # tests/test_config.py
-import textwrap
-from pathlib import Path
+import os
 from olmount.config import Config
 
 def test_load_and_save_profiles(tmp_path, monkeypatch):
@@ -28,3 +27,11 @@ def test_unknown_server_raises(tmp_path, monkeypatch):
         cfg.server("nope"); assert False
     except KeyError:
         pass
+
+def test_save_restricts_file_permissions(tmp_path, monkeypatch):
+    monkeypatch.setattr("olmount.config.CONFIG_PATH", tmp_path / "c.toml")
+    cfg = Config.load()
+    cfg.set_server("s", url="https://x", cookie="c", csrf="x", user_id="u", email="e")
+    cfg.save()
+    mode = os.stat(tmp_path / "c.toml").st_mode & 0o777
+    assert mode == 0o600

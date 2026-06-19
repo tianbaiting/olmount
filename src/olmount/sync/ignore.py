@@ -4,7 +4,7 @@ import pathspec
 
 class IgnoreFilter:
     def __init__(self, patterns: list[str] | None = None):
-        self.spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns or [])
+        self.spec = pathspec.PathSpec.from_lines("gitignore", patterns or [])
 
     @classmethod
     def from_file(cls, path: Path | None) -> "IgnoreFilter":

@@ -11,16 +11,22 @@ def login_cmd(server, cookie, user):
     name = server or cfg.default_server()
     if not name:
         raise click.UsageError("no server; run `olmount servers add NAME --url URL` first")
-    prof = cfg.server(name)
-    if cookie:
-        info = cookie_login(prof.url, cookie)
-        cfg.set_server(name, cookie=cookie, csrf=info.csrf, user_id=info.user_id, email=info.email)
-    elif user:
-        pw = click.prompt("password", hide_input=True)
-        ck, csrf = password_login(prof.url, user, pw)
-        info = cookie_login(prof.url, ck)
-        cfg.set_server(name, cookie=ck, csrf=csrf, user_id=info.user_id, email=info.email)
-    else:
+    try:
+        prof = cfg.server(name)
+    except KeyError:
+        raise click.ClickException(f"unknown server '{name}'; run `olmount servers list`")
+    if not (cookie or user):
         raise click.UsageError("provide --cookie or --user")
+    try:
+        if cookie:
+            info = cookie_login(prof.url, cookie)
+            cfg.set_server(name, cookie=cookie, csrf=info.csrf, user_id=info.user_id, email=info.email)
+        else:
+            pw = click.prompt("password", hide_input=True)
+            ck, csrf = password_login(prof.url, user, pw)
+            info = cookie_login(prof.url, ck)
+            cfg.set_server(name, cookie=ck, csrf=csrf, user_id=info.user_id, email=info.email)
+    except CookieExpired as e:
+        raise click.ClickException(str(e))
     cfg.save()
     click.echo(f"logged in as {info.email} on '{name}'")
