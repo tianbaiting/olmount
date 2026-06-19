@@ -254,9 +254,12 @@ class EphemeralOLClient:
             self._v09 = _V09Transport(self.base_url, self.cookie)
             self._v09.connect()
             return True
-        except Exception:
+        except Exception as exc:
             self._v09 = None
-            return False
+            raise ConnectionError(
+                "Socket.IO v0.9 server detected, but the legacy transport failed: "
+                f"{exc}"
+            ) from exc
 
     def _connect_v4(self):
         origin = self.base_url

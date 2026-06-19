@@ -51,3 +51,32 @@ def test_emit_times_out_if_no_ack(monkeypatch):
     c = EphemeralOLClient("https://ol.lab.edu/", "c")
     with pytest.raises(TimeoutError):
         c.join_project("p1")  # via _emit
+
+def test_v09_detection_surfaces_legacy_transport_failure(monkeypatch):
+    import olmount.api.socketio as sio_mod
+
+    class Response:
+        status_code = 200
+        text = "abc:60:60:websocket,xhr-polling"
+
+    class BrokenV09Transport:
+        def __init__(self, *args, **kwargs): pass
+        def connect(self): raise ModuleNotFoundError("No module named 'websocket'")
+
+    v4_called = False
+
+    class V4Transport:
+        def connect(self, *args, **kwargs):
+            nonlocal v4_called
+            v4_called = True
+
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(sio_mod, "_V09Transport", BrokenV09Transport)
+    monkeypatch.setattr(sio_mod, "_new_transport", lambda *args, **kwargs: V4Transport())
+
+    c = EphemeralOLClient("https://ol.lab.edu/", "sharelatex.sid=x")
+    with pytest.raises(ConnectionError) as exc:
+        c.connect()
+
+    assert "Socket.IO v0.9" in str(exc.value)
+    assert v4_called is False
