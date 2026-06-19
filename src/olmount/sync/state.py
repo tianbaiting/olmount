@@ -23,7 +23,18 @@ class ProjectState:
     def exists(self) -> bool:
         return self.state_path.is_file()
 
+    def _recover_base(self) -> None:
+        """Restore base/ if a crash interrupted the rename swap in advance()."""
+        if not self.base_dir.exists():
+            old = self.olsync / "base.old"
+            staging = self.olsync / ".base-staging"
+            if old.exists():
+                old.rename(self.base_dir)
+            elif staging.exists():
+                staging.rename(self.base_dir)
+
     def load(self) -> "ProjectState":
+        self._recover_base()
         self.data = json.loads(self.state_path.read_text())
         return self
 
@@ -55,6 +66,7 @@ class ProjectState:
         if staging.exists():
             shutil.rmtree(staging)
         staging.mkdir(parents=True)
+        mirrored = {}
         for relpath in new_base_meta:
             src = working_root / relpath
             if not src.is_file():
@@ -62,6 +74,7 @@ class ProjectState:
             dst = staging / relpath
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+            mirrored[relpath] = new_base_meta[relpath]
         old = self.olsync / "base.old"
         if old.exists():
             shutil.rmtree(old)
@@ -70,5 +83,5 @@ class ProjectState:
         staging.rename(self.base_dir)
         if old.exists():
             shutil.rmtree(old)
-        self.data["base"] = new_base_meta
+        self.data["base"] = mirrored
         self.save()
