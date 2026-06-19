@@ -133,3 +133,76 @@ def test_conflict_overlapping_writes_markers_and_does_not_push(tmp_path):
     assert "<<<<<<< local" in on_disk and "=======" in on_disk and ">>>>>>> remote" in on_disk
     assert "LINE2 LOCAL" in on_disk and "LINE2 REMOTE" in on_disk
     assert not sock.applies, "conflict must not be pushed"
+
+
+def test_c1_clean_auto_merge_is_pushed_no_data_loss_two_passes(tmp_path):
+    # non-overlapping changes: local edits line2, remote edits line4 -> clean 3-way merge.
+    # C1 fix: the merged result MUST be pushed, so a second pass converges (SKIP) and the
+    # local edit (LINE2) is preserved. Without the fix, pass 2 would pull remote and lose LINE2.
+    base = "line1\nline2\nline3\nline4\n"
+    local = "line1\nLINE2\nline3\nline4\n"        # local: line2
+    remote = "line1\nline2\nline3\nLINE4\n"        # remote: line4
+    merged = "line1\nLINE2\nline3\nLINE4\n"
+    ProjectState.init(tmp_path, server="x", projectId="p1", projectName="paper", rootDocId="d1")
+    (tmp_path / "main.tex").write_text(base)
+    st = ProjectState(tmp_path).load()
+    bd = base.encode()
+    st.advance({"main.tex": {"kind": "doc", "id": "d1", "docVersion": 7,
+                             "sha1": sha1_hex(bd), "size": len(bd)}}, tmp_path,
+               lambda p: p.startswith(".olsync"))
+    st.load()
+    (tmp_path / "main.tex").write_text(local)       # local edit
+    sock = FakeSock(doc_content=remote, doc_version=7)   # remote has line4 edit
+    rest = FakeREST(zip_main=remote)
+    # make download_zip reflect the (pushed) doc content so a 2nd pass sees convergence
+    rest.download_zip = lambda pid: _zip({"main.tex": sock.doc["d1"]["content"]})
+    eng = Engine(state=st, rest=rest, sock=sock, project_id="p1", working_root=tmp_path,
+                 ignore=lambda p: p.startswith(".olsync"), on_event=lambda *a: None)
+    r1 = eng.reconcile(direction="both")
+    assert "main.tex" in r1["pushed"], "clean auto-merge must be pushed (C1)"
+    assert (tmp_path / "main.tex").read_text() == merged
+    # pass 2: base==local==remote==merged -> SKIP, no pull/conflict, LINE2 preserved
+    st2 = ProjectState(tmp_path).load()
+    eng2 = Engine(state=st2, rest=rest, sock=sock, project_id="p1", working_root=tmp_path,
+                  ignore=lambda p: p.startswith(".olsync"), on_event=lambda *a: None)
+    r2 = eng2.reconcile(direction="both")
+    assert "main.tex" not in r2["pulled"] and "main.tex" not in r2["conflicts"]
+    assert (tmp_path / "main.tex").read_text() == merged   # LINE2 preserved (no data loss)
+
+
+def test_ensure_parent_handles_repeated_segment_names(tmp_path):
+    # build a tree whose root has a folder "a"; pushing a/a/file.tex must create a NESTED a
+    import olmount.sync.tree as treemod
+    project = {"rootFolder": [{"_id": "root0", "name": "root", "docs": [], "fileRefs": [],
+                               "folders": [{"_id": "A1", "name": "a", "docs": [], "fileRefs": [], "folders": []}]}],
+               "rootDoc_id": ""}
+    tree = treemod.RemoteTree(project)
+    created = []
+    class REST:
+        def add_folder(self, pid, pfid, n): created.append((pfid, n)); return {"_id": f"new-{n}", "name": n}
+    st = ProjectState.init(tmp_path, server="x", projectId="p1", projectName="p", rootDocId="")
+    eng = Engine(state=st, rest=REST(), sock=None, project_id="p1", working_root=tmp_path,
+                 ignore=lambda p: False, on_event=lambda *a: None)
+    parent = eng._ensure_parent("a/a/file.tex", tree)
+    # must have created a nested "a" under A1 (the existing top-level a), not returned A1
+    assert ("A1", "a") in created, "expected a nested folder 'a' created under the existing 'a'"
+
+
+def test_apply_doc_update_empty_ops_is_success_not_conflict(tmp_path):
+    # I4: if remote already equals target, there's nothing to push -> success, not conflict
+    base = "line1\nline2\nline3\n"
+    ProjectState.init(tmp_path, server="x", projectId="p1", projectName="p", rootDocId="d1")
+    (tmp_path / "main.tex").write_text(base)
+    st = ProjectState(tmp_path).load()
+    bd = base.encode()
+    st.advance({"main.tex": {"kind": "doc", "id": "d1", "docVersion": 7, "sha1": sha1_hex(bd), "size": len(bd)}},
+               tmp_path, lambda p: p.startswith(".olsync"))
+    st.load()
+    sock = FakeSock(doc_content=base, doc_version=7)   # remote == local == base
+    rest = FakeREST(zip_main=base)
+    rest.download_zip = lambda pid: _zip({"main.tex": sock.doc["d1"]["content"]})
+    eng = Engine(state=st, rest=rest, sock=sock, project_id="p1", working_root=tmp_path,
+                 ignore=lambda p: p.startswith(".olsync"), on_event=lambda *a: None)
+    # force a PUSH-classified path whose target already equals remote -> empty ops -> success
+    eng._apply_doc_update("main.tex", "d1", st.data["base"], base, results := {"pulled": [], "pushed": [], "conflicts": [], "deleted": []})
+    assert "main.tex" in results["pushed"] and "main.tex" not in results["conflicts"]

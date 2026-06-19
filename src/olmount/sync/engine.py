@@ -98,7 +98,7 @@ def _guess_kind(path: str) -> str:
         ".tex", ".bib", ".cls", ".sty", ".txt", ".md", ".latexmkrc", ".tikz"} else "file"
 
 
-from olmount.sync.ot import diff_ops, apply_ops
+from olmount.sync.ot import diff_ops
 from olmount.sync.merge import three_way_merge
 from olmount.sync.tree import RemoteTree
 from olmount.util import atomic_write_bytes
@@ -115,7 +115,6 @@ class Engine:
         self.ignore = ignore
         self.on_event = on_event
 
-    # ---------- content helpers ----------
     def _local_content(self, rel):
         return (self.working_root / rel).read_bytes()
 
@@ -126,7 +125,6 @@ class Engine:
         res = self.sock.join_doc(doc_id)
         return "".join(res["docLines"]), res["version"]
 
-    # ---------- main ----------
     def reconcile(self, direction="both"):
         st = self.state
         tree = RemoteTree(self.sock.join_project(self.project_id))
@@ -153,8 +151,10 @@ class Engine:
             self.on_event(f"sync error: {e}")
             raise
         finally:
-            if ok:
-                self._advance(tree)
+            # R1 + C1: advance only on success AND with no unresolved conflicts.
+            # Unresolved conflicts preserve the original base so the local side is never lost.
+            if ok and not results["conflicts"]:
+                self._advance()
         return results
 
     def _do_pulls(self, actions, zf, results):
@@ -194,18 +194,22 @@ class Engine:
         else:
             found = tree.find_id_by_path(p)
             if not found:
+                # I3: surface missing id rather than silently dropping the push
+                results["conflicts"].append(p)
+                self.on_event(f"cannot push {p}: no remote id resolved")
                 return
             eid, _rkind = found
             if kind == "doc":
-                self._push_doc_edit(p, eid, base_meta, results)
+                self._apply_doc_update(p, eid, base_meta, data.decode("utf-8"), results)
             else:
                 self.rest.upload_file(self.project_id, parent, pathlib.Path(p).name, data)
                 self.rest.delete_entity(self.project_id, "file", eid)
                 results["pushed"].append(p)
 
-    def _push_doc_edit(self, p, doc_id, base_meta, results):
-        """R3: generate OT from CURRENT remote; on rejection re-fetch + re-merge + regenerate."""
-        local_text = self._local_content(p).decode("utf-8")
+    def _apply_doc_update(self, p, doc_id, base_meta, local_text, results):
+        """R3: push `local_text` (the desired final content) via OT, generating ops from
+        CURRENT remote. On rejection re-fetch + full re-merge + regenerate; never resend
+        stale ops. If remote already equals target (converged), that's a no-op success."""
         base_text = self._base_content(p).decode("utf-8") if p in base_meta else local_text
         remote_now, remote_version = self._remote_doc_text(doc_id)
         target = local_text
@@ -214,15 +218,17 @@ class Engine:
         for _ in range(MAX_OT_RETRIES):
             ops = diff_ops(remote_now, target)  # from CURRENT remote -> target
             if not ops:
-                break
+                # I4: nothing to push — remote already equals target (converged) -> success
+                results["pushed"].append(p)
+                return
             resp = self.sock.apply_ot_update(doc_id, {
                 "doc": doc_id, "v": remote_version,
                 "lastV": base_meta.get(p, {}).get("docVersion"),
-                "op": ops})
+                "op": ops}) or {}
             if resp.get("accepted"):
                 results["pushed"].append(p)
                 return
-            # rejected: re-fetch remote, full re-merge, regenerate  (R3 — never resend stale ops)
+            # rejected: re-fetch remote, full re-merge, regenerate (R3 — never resend stale ops)
             remote_now, remote_version = self._remote_doc_text(doc_id)
             target, _ = three_way_merge(base_text, local_text, remote_now)
         results["conflicts"].append(p)
@@ -231,22 +237,29 @@ class Engine:
     def _resolve_conflict(self, p, base_meta, local_snap, remote_snap, tree, zf, results):
         kind = (local_snap.get(p, {}) or {}).get("kind") or (remote_snap.get(p, {}) or {}).get("kind", "doc")
         if kind == "doc":
-            base_text = self._base_content(p).decode("utf-8") if p in base_meta else ""
             local_text = self._local_content(p).decode("utf-8")
+            # C1 protection: unresolved markers from a prior pass -> do not clobber
+            if "<<<<<<< local" in local_text and ">>>>>>> remote" in local_text:
+                results["conflicts"].append(p)
+                self.on_event(f"unresolved conflict markers in {p}; edit to remove markers then re-run")
+                return
+            base_text = self._base_content(p).decode("utf-8") if p in base_meta else ""
             remote_text = zf.read(p).decode("utf-8") if zf is not None else None
             if remote_text is None:
                 found = tree.find_id_by_path(p)
-                if found:
-                    remote_text, _ = self._remote_doc_text(found[0])
-                else:
-                    remote_text = ""
+                remote_text, _ = self._remote_doc_text(found[0]) if found else ("", 0)
             merged, conflict = three_way_merge(base_text, local_text, remote_text)
             atomic_write_bytes(self.working_root / p, merged.encode("utf-8"))
             if conflict:
                 results["conflicts"].append(p)
-                self.on_event(f"conflict markers written: {p}")
+                self.on_event(f"conflict markers written: {p}; resolve and re-run")
             else:
-                results["pushed"].append(p)  # auto-merged; pushed on a later pass
+                # C1 fix: clean auto-merge -> PUSH via OT so remote converges (no data loss)
+                found = tree.find_id_by_path(p)
+                if found:
+                    self._apply_doc_update(p, found[0], base_meta, merged, results)
+                else:
+                    results["pushed"].append(p)
         else:
             local_data = self._local_content(p)
             remote_data = zf.read(p) if zf is not None else b""
@@ -256,19 +269,31 @@ class Engine:
             self.on_event(f"binary conflict (keep-both): {p}")
 
     def _ensure_parent(self, p, tree):
+        # I2 fix: accumulator (not parts.index, which breaks on repeated segment names)
         parts = p.split("/")[:-1]
         cur = tree.root_folder_id()
+        acc = ""
         for part in parts:
-            acc_full = "/".join(p.split("/")[: parts.index(part) + 1])
-            found = tree.find_id_by_path(acc_full)
+            acc = f"{acc}{part}/" if acc else f"{part}/"
+            found = tree.find_id_by_path(acc.rstrip("/"))
             if found:
                 cur = found[0]
             else:
-                made = self.rest.add_folder(self.project_id, cur, part)
-                cur = made["_id"]
+                # tree.find_id_by_path only indexes docs/files; also check tree.nodes for
+                # an existing folder with this name under the current parent (so we don't
+                # recreate folders that already exist remotely)
+                fid = next((nid for nid, n in tree.nodes.items()
+                            if n.kind == "folder" and n.parent == cur and n.name == part), None)
+                if fid:
+                    cur = fid
+                else:
+                    made = self.rest.add_folder(self.project_id, cur, part)
+                    cur = made["_id"]
         return cur
 
-    def _advance(self, tree):
+    def _advance(self):
+        # I1 fix: refresh the tree so docVersions reflect post-push state
+        tree = RemoteTree(self.sock.join_project(self.project_id))
         zf = self.rest.download_zip(self.project_id)
         remote_snap = build_remote_snapshot(zf, tree)
         local_snap = build_local_snapshot(self.working_root, self.ignore)
