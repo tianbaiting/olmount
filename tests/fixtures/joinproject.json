@@ -1,0 +1,28 @@
+{
+  "rootFolder": [
+    {
+      "_id": "root0",
+      "name": "root",
+      "docs": [
+        { "_id": "d1", "name": "main.tex", "version": 7 }
+      ],
+      "fileRefs": [
+        { "_id": "f1", "name": "logo.png", "created": "2024-01-01T00:00:00Z" }
+      ],
+      "folders": [
+        {
+          "_id": "fo1",
+          "name": "secs",
+          "docs": [
+            { "_id": "d2", "name": "a.tex", "version": 3 }
+          ],
+          "fileRefs": [],
+          "folders": []
+        }
+      ]
+    }
+  ],
+  "rootDoc_id": "d1",
+  "compiler": "pdflatex",
+  "spellCheckLanguage": ""
+}
