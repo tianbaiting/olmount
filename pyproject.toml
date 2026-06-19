@@ -7,6 +7,12 @@ name = "olmount"
 version = "0.1.0"
 description = "Two-way sync client for Overleaf (incl. self-hosted)"
 requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Topic :: Utilities",
+]
 dependencies = [
   "requests>=2.31",
   "python-socketio>=5.10",

@@ -98,6 +98,12 @@ docs/superpowers/
 Early/experimental. **Field-test on a throwaway project before trusting it with large or crucial work** — keep a backup outside the synced tree. Known constraints:
 
 - OT doc writes use **UTF-16 code-unit offsets** to match the Overleaf protocol; pure-ASCII and BMP text is handled correctly, but exotic surrogate-pair edge cases deserve care.
-- The Socket.IO emit path currently uses a short placeholder wait; real-server timing under load should be validated before relying on it for large multi-file bursts.
+- The Socket.IO emit path blocks on a `threading.Event` ack (30 s timeout). It is unit-tested against fakes but **not yet validated against a live Overleaf instance** — run the manual e2e procedure in `docs/superpowers/plans/` before relying on it.
 - Password login works only on non-SSO self-hosted instances; use `--cookie` everywhere else.
 - No background daemon: `olmount watch` runs in the foreground.
+
+## License
+
+Copyright (C) `olmount` contributors.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License v3 (or later)** as published by the Free Software Foundation. See [LICENSE](./LICENSE) for the full text. This program is distributed WITHOUT ANY WARRANTY.
