@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+import requests
 from dataclasses import dataclass
 from olmount.api.http_client import HttpClient, HttpError
 
@@ -32,16 +33,18 @@ def password_login(base_url: str, email: str, password: str) -> tuple[str, str]:
     """Returns (cookie, csrf). Only works where no SSO/captcha (typical self-hosted CE)."""
     c = HttpClient(base_url, cookie="")
     r = c.get("login")
-    m = re.search(r'<input.*?name="_csrf".*?value="([^"]*)"', r.text)
-    if not m: raise CookieExpired("could not get login CSRF")
+    m = re.search(r'<input.*?name="_csrf".*?value="([^"]*)"', r.text, re.DOTALL)
+    if not m:
+        raise CookieExpired("could not get login CSRF")
     csrf = m[1]
-    set_cookie = r.headers.get("set-cookie", "")
-    sess = set_cookie.split(";")[0]
+    sess = r.headers.get("set-cookie", "").split(";")[0]
+    url = base_url if base_url.endswith("/") else base_url + "/"
     try:
-        r2 = c.post_json("login", {"_csrf": csrf, "email": email, "password": password},
-                         extra_headers={"Cookie": sess})
-    except HttpError as e:
-        raise CookieExpired(f"password login failed (status {e.status_code}); captcha/SSO? use --cookie") from e
+        r2 = c.session.post(url + "login",
+                            data={"_csrf": csrf, "email": email, "password": password},
+                            headers={"Cookie": sess}, allow_redirects=False, timeout=c.timeout)
+    except requests.exceptions.RequestException as e:
+        raise CookieExpired(f"password login request failed: {e}") from e
     if r2.status_code != 302 or "/login" in r2.headers.get("Location", ""):
         raise CookieExpired("password login failed (captcha/SSO? use --cookie)")
     sc = r2.headers.get("set-cookie", "").split(";")[0]

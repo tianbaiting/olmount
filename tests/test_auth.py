@@ -24,3 +24,21 @@ def test_cookie_login_401_raises_expired():
     responses.add(responses.GET, "https://ol.lab.edu/project", status=401)
     with pytest.raises(CookieExpired):
         cookie_login("https://ol.lab.edu/", "sharelatex.sid=bad")
+
+@responses.activate
+def test_password_login_posts_form_encoded_and_returns_cookie_csrf():
+    # GET /login returns a CSRF + session cookie
+    responses.add(responses.GET, "https://ol.lab.edu/login", status=200,
+                  body='<input name="_csrf" value="CSRF123">',
+                  headers={"set-cookie": "anon=ANON; Path=/"})
+    # POST /login succeeds (302 to /project) and sets the auth cookie
+    responses.add(responses.POST, "https://ol.lab.edu/login", status=302,
+                  headers={"Location": "/project", "set-cookie": "overleaf_session2=AUTH; Path=/"})
+    cookie, csrf = password_login("https://ol.lab.edu/", "me@lab.edu", "pw")
+    assert "AUTH" in cookie and csrf == "CSRF123"
+    # the POST must be form-encoded, NOT json
+    post_req = responses.calls[1].request
+    assert post_req.headers.get("Content-Type", "").startswith("application/x-www-form-urlencoded"), \
+        "password login must POST form-encoded data, not JSON"
+    body = post_req.body
+    assert "_csrf=CSRF123" in body and "email=me%40lab.edu" in body and "password=pw" in body
