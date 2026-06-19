@@ -40,6 +40,12 @@ def servers_set_default(name):
 from olmount.commands.login import login_cmd; main.add_command(login_cmd)            # noqa: E402
 from olmount.commands.logout import logout_cmd; main.add_command(logout_cmd)         # noqa: E402
 from olmount.commands.whoami import whoami_cmd; main.add_command(whoami_cmd)         # noqa: E402
+from olmount.commands.clone import clone_cmd; main.add_command(clone_cmd)            # noqa: E402
+from olmount.commands.list import list_cmd; main.add_command(list_cmd, name="list")  # noqa: E402
+from olmount.commands.status import status_cmd; main.add_command(status_cmd)         # noqa: E402
+from olmount.commands.pull import pull_cmd; main.add_command(pull_cmd)               # noqa: E402
+from olmount.commands.push import push_cmd; main.add_command(push_cmd)               # noqa: E402
+from olmount.commands.sync import sync_cmd; main.add_command(sync_cmd)               # noqa: E402
 
 if __name__ == "__main__":
     main()
