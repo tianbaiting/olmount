@@ -2,8 +2,10 @@ from __future__ import annotations
 import io, re, zipfile, json
 from olmount.api.http_client import HttpClient
 
-_META_RE = re.compile(r'<meta\s+name="ol-prefetchedProjectsBlob"\s+content=(?P<q>["\'])(?P<c>.*?)(?P=q)')
-_PROJECTS_RE = re.compile(r'<meta\s+name="ol-projects"\s+content=(?P<q>["\'])(?P<c>.*?)(?P=q)')
+# NOTE: Overleaf may insert attributes (e.g. data-type="json") between name= and content=,
+# so we bridge with [^>]*? rather than requiring them to be adjacent.
+_META_RE = re.compile(r'<meta\s+name="ol-prefetchedProjectsBlob"[^>]*?content=(?P<q>["\'])(?P<c>.*?)(?P=q)')
+_PROJECTS_RE = re.compile(r'<meta\s+name="ol-projects"[^>]*?content=(?P<q>["\'])(?P<c>.*?)(?P=q)')
 
 class OverleafREST:
     def __init__(self, http: HttpClient): self.http = http
