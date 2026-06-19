@@ -32,3 +32,10 @@ def test_apply_ot_update_returns_accepted(monkeypatch):
     c, fake = make(monkeypatch, {"applyOtUpdate": ({"accepted": True, "v": 8},)})
     out = c.apply_ot_update("d1", {"doc":"d1","v":7,"op":[{"p":0,"i":"x"}]})
     assert out["accepted"] is True
+
+def test_apply_ot_update_normalizes_multiarg(monkeypatch):
+    # real servers may return (error, data) tuples; apply_ot_update must surface the dict, not the tuple
+    c, fake = make(monkeypatch, {"applyOtUpdate": (None, {"accepted": False, "error": "otupdate", "v": 9})})
+    out = c.apply_ot_update("d1", {"doc":"d1","v":7,"op":[]})
+    assert isinstance(out, dict)
+    assert out["accepted"] is False and out["v"] == 9

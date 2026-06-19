@@ -31,22 +31,22 @@ class EphemeralOLClient:
             self._s = _new_transport(self.base_url, self.cookie)
         result = {}
         def cb(*args):
-            result["res"] = args[0] if len(args) == 1 else args
+            if len(args) == 0:
+                result["res"] = None
+            elif len(args) == 1:
+                result["res"] = args[0]
+            else:
+                # Overleaf positional callbacks: (err, payload, ...) -> take payload ([1])
+                result["res"] = args[1]
         self._s.emit(event, data, callback=cb)
         self._s.sleep(0.01)  # let callback fire; engine callers run single-threaded
         return result.get("res")
 
     def join_project(self, project_id) -> dict:
-        res = self._emit("joinProject", {"project_id": project_id})
-        if isinstance(res, tuple):
-            res = res[1] if len(res) > 1 else res[0]
-        return res
+        return self._emit("joinProject", {"project_id": project_id})
 
     def join_doc(self, doc_id) -> dict:
-        res = self._emit("joinDoc", {"doc_id": doc_id, "ranges": []})
-        if isinstance(res, tuple):
-            res = res[1] if len(res) > 1 else res[0]
-        return res
+        return self._emit("joinDoc", {"doc_id": doc_id, "ranges": []})
 
     def apply_ot_update(self, doc_id, update: dict) -> dict:
         update = dict(update); update["doc"] = doc_id
