@@ -13,6 +13,14 @@ def test_list_projects_parses_meta():
     assert [p["name"] for p in projects] == ["paper"]
 
 @responses.activate
+def test_list_projects_bare_array_meta():
+    # older/self-hosted Overleaf: ol-projects is a bare JSON array of project objects
+    html = '<meta name="ol-projects" content=\'[{"id":"p2","name":"legacy"}]\'>'
+    responses.add(responses.GET, "https://ol.lab.edu/project", status=200, body=html)
+    projects = OverleafREST(HttpClient("https://ol.lab.edu/", "c", "csrf")).list_projects()
+    assert [p["name"] for p in projects] == ["legacy"]
+
+@responses.activate
 def test_download_zip_returns_zipfile():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z: z.writestr("main.tex", "hello")

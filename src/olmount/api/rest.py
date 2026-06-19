@@ -14,7 +14,9 @@ class OverleafREST:
             m = rx.search(r.text)
             if m:
                 data = json.loads(m["c"].replace("&quot;", '"'))
-                return data.get("projects", data if isinstance(data, list) else [])
+                if isinstance(data, list):
+                    return data
+                return data.get("projects", [])
         return []
 
     def download_zip(self, project_id: str) -> zipfile.ZipFile:
