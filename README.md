@@ -19,6 +19,7 @@ Custom-domain / self-hosted Overleaf is the headline use case:
 ```bash
 olmount servers add myhost --url https://ol.mylab.edu
 olmount login --server myhost --cookie "sharelatex.sid=..."   # from browser devtools
+olmount login --server myhost --cookie "overleaf_session2=..."   # from browser devtools
 olmount list --server myhost
 olmount clone <project-id> --server myhost --into ./proj
 cd proj
