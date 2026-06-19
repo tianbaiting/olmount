@@ -16,6 +16,7 @@ classifiers = [
 dependencies = [
   "requests>=2.31",
   "python-socketio>=5.10",
+  "websocket-client>=1.6",
   "diff-match-patch>=1.0",
   "merge3>=0.0.0",
   "watchdog>=3.0",
